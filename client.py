@@ -71,6 +71,12 @@ class CryobossClient(object):
         result : str
             Acknowledgement string from cryoboss
         '''
+        # do not change setpoint if mag cycle is running
+        self.socket.send(b'mc/reg = ?')
+        mag_cycle = self.socket.recvfrom(2048)[0].decode("utf-8")
+        if 'TRUE' in mag_cycle:
+            raise ValueError('Cannot change setpoint when mag cycle is running.')
+        
         # check voltage divider
         if self.voltage_divider is False and setpoint > 0.15:
             raise ValueError('Cannot regulate above 0.15 K without voltage '
@@ -108,3 +114,10 @@ class CryobossClient(object):
         self.socket.send('pidset = {:4f}'.format(setpoint).encode('utf_8'))
         result = self.socket.recvfrom(2048)
         return result
+
+    
+    def close(self):
+        '''
+        Close the socket connection.
+        '''
+        self.socket.close()
