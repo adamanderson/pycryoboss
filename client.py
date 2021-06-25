@@ -56,7 +56,11 @@ class CryobossClient(object):
         return data_dict
 
 
-    def set_pid(self, setpoint):
+    def set_pid(self, setpoint,
+                ignore_cycle_check=False,
+                ignore_setpoint_check=False,
+                ignore_setpoint_step_check=False,
+                ignore_temp_rate_check=False):
         '''
         Set the FAA PID setpoint. Because of safety checks built in to this
         function, the execution time is 10 sec.
@@ -65,6 +69,16 @@ class CryobossClient(object):
         ----------
         setpoint : float
             Temperature setpoint in Kelvin
+        ignore_cycle_check : bool (default = False)
+            Ignore the check for whether the fridge cycle is running
+        ignore_setpoint_check : bool (default = False)
+            Ignore the check for whether the setpoint is <150mK
+        ignore_setpoint_step_check : bool (default = False)
+            Ignore the check for whether the setpoint is >20mK above the
+            current FAA temperature
+        ignore_temp_rate_check : bool (default = False)
+            Ignore the check for the rate of change of the FAA
+            temperature
 
         Returns
         -------
@@ -74,28 +88,28 @@ class CryobossClient(object):
         # do not change setpoint if mag cycle is running
         self.socket.send(b'mc/reg = ?')
         mag_cycle = self.socket.recvfrom(2048)[0].decode("utf-8")
-        if 'TRUE' in mag_cycle:
+        if 'TRUE' in mag_cycle and not ignore_cycle_check:
             raise ValueError('Cannot change setpoint when mag cycle is running.')
         
         # check voltage divider
-        if self.voltage_divider is False and setpoint > 0.15:
+        if self.voltage_divider is False and setpoint > 0.15 and not ignore_setpoint_check:
             raise ValueError('Cannot regulate above 0.15 K without voltage '
                              'divider installed.')
         
         # do not allow setpoint to be increased more than 20mK above the
         # current FAA temperature
         data = self.get_data()
-        if setpoint > data['50 mK FAA Temperature'] + 0.020:
+        if setpoint > data['50 mK FAA Temperature'] + 0.020 and not ignore_setpoint_step_check:
             raise ValueError('Cannot set FAA setpoint more than 20mK above '
                              'the current FAA temperature.')
 
-        # do not allow setpoint to be increased if Kepco voltage is > 14V or
+        # do not allow setpoint to be increased if Kepco voltage is > 15V or
         # current is > 8A
         if (setpoint > data['PID Setpoint']) and (data['Magnet Current'] > 8):
             raise ValueError('Magnet current is {:4f} A. Cannot increase '
                              'setpoint when current exceeds 8 A.'\
                                  .format(data['Magnet Current']))
-        if (setpoint > data['PID Setpoint']) and (data['Power Supply Voltage'] > 14):
+        if (setpoint > data['PID Setpoint']) and (data['Power Supply Voltage'] > 15):
             raise ValueError('Power supply voltage is {:4f} V. Cannot increase '
                              'setpoint when current exceeds 14 V.'\
                                  .format(data['Power Supply Voltage']))
@@ -105,7 +119,7 @@ class CryobossClient(object):
         time.sleep(10)
         data_new = self.get_data()
         delta_T = data_new['50 mK FAA Temperature'] - data['50 mK FAA Temperature']
-        if (setpoint > data_new['PID Setpoint']) and (delta_T > 0.001):
+        if (setpoint > data_new['PID Setpoint']) and (delta_T > 0.001) and not ignore_temp_rate_check:
             raise ValueError('FAA temperature increased {:4f} K in 10 sec. '
                              'Cannot increase FAA setpoint when the rate is '
                              '>0.001 K per 10 sec.'.format(delta_T))
